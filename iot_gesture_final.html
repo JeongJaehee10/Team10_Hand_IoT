@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT 손동작 통합 제어 시스템</title>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    :root {
+      --bg: #f0f2f5;
+      --panel: #ffffff;
+      --card: #f8f9fa;
+      --border: #dee2e6;
+      --accent: #0d6efd;
+      --accent2: #6610f2;
+      --on: #198754;
+      --off: #dc3545;
+      --text: #212529;
+      --text-dim: #6c757d;
+      --log-bg: #212529;
+      --cam-bg: #0f172a;
+      --warn: #f39c12;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #ced4da; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #adb5bd; }
+
+    body {
+      font-family: '맑은 고딕', 'Malgun Gothic', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: row;
+    }
+
+    button { font-family: inherit; }
+
+    /* Left 50% Area for All UIs */
+    .ui-wrapper {
+      width: 50%;
+      height: 100%;
+      display: flex;
+      flex-direction: row;
+      border-right: 1px solid var(--border);
+      background: var(--bg);
+    }
+
+    /* Column 1: Device Controls */
+    .left-panel {
+      flex: 1;
+      height: 100%;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    /* Column 2: Status, Log, Camera */
+    .middle-panel {
+      flex: 1;
+      height: 100%;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    /* Right 50% Area for Image */
+    .right-panel {
+      width: 50%;
+      height: 100%;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      position: relative;
+    }
+
+    /* Common Components */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .header-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-size: 22px;
+      box-shadow: var(--shadow);
+    }
+
+    .header h1 { font-size: 17px; color: var(--accent); letter-spacing: 0.5px; }
+    .header p { font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+    .section-title { font-size: 11px; font-weight: 800; letter-spacing: 1.8px; color: #343a40; text-transform: uppercase; margin-bottom: 4px; }
+
+    /* Device Cards */
+    .device-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      transition: border-color 0.25s, box-shadow 0.25s;
+    }
+    .device-card.is-on { border-color: var(--on); box-shadow: 0 0 0 1px rgba(25,135,84,0.18); }
+    .device-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(13,110,253,0.18); }
+    .device-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .device-name { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px; }
+
+    /* Toggles */
+    .toggle-wrap { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+    .toggle {
+      position: relative; width: 44px; height: 24px; background: var(--border);
+      border-radius: 12px; border: 0; cursor: pointer; transition: background 0.25s;
+    }
+    .toggle::after {
+      content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+      border-radius: 50%; background: #fff; transition: transform 0.25s;
+    }
+    .toggle.on { background: var(--on); }
+    .toggle.on::after { transform: translateX(20px); }
+    .toggle-label { min-width: 22px; font-weight: 800; }
+
+    /* Media Controls */
+    .media-controls { overflow: hidden; max-height: 0; opacity: 0; transition: max-height 0.35s ease, opacity 0.25s ease, margin-top 0.25s; }
+    .media-controls.visible { max-height: 340px; opacity: 1; margin-top: 12px; }
+    .media-track { background: rgba(13, 110, 253, 0.08); color: var(--accent); border-radius: 9px; padding: 10px 12px; margin-bottom: 10px; font-size: 12px; font-weight: 700; display: flex; gap: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .btn-full { grid-column: span 2; }
+    .media-btn { padding: 9px 8px; font-size: 12px; font-weight: 700; border: 1px solid var(--border); border-radius: 8px; background: rgba(0,0,0,0.03); color: var(--text); cursor: pointer; transition: 0.2s; }
+    .media-btn:hover { background: rgba(13, 110, 253, 0.08); border-color: var(--accent); color: var(--accent); }
+    .media-btn.playing { background: rgba(25,135,84,0.1); border-color: var(--on); color: var(--on); }
+
+    /* Volume Bar */
+    .vol-bar-wrap { grid-column: span 2; display: flex; align-items: center; gap: 8px; padding: 2px 4px 0; }
+    .vol-label { min-width: 62px; color: var(--text-dim); font-size: 11px; font-weight: 700; }
+    .vol-bar-bg { flex: 1; height: 5px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .vol-bar-fill { height: 100%; width: 70%; background: var(--accent); border-radius: 99px; transition: width 0.2s; }
+
+    /* Status Panel */
+    .status-panel, .log-panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+      box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .status-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+    .status-item { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; text-align: center;}
+    .status-label { font-size: 10px; color: var(--text-dim); font-weight: 800; letter-spacing: 0.5px; margin-bottom: 5px; }
+    .status-value { font-size: 13px; font-weight: 900; color: var(--text); }
+    .status-value.accent { color: var(--accent); }
+    .status-value.on { color: var(--on); }
+    .status-value.warn { color: var(--warn); }
+
+    .finger-row { margin-top: 10px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .finger-chip { border-radius: 8px; border: 1px solid var(--border); background: var(--card); padding: 7px 2px; text-align: center; font-size: 10px; font-weight: 800; color: var(--text-dim); }
+    .finger-chip.open { border-color: var(--on); color: var(--on); background: rgba(25,135,84,0.08); }
+
+    /* Log Container */
+    .log-panel { flex: 1; min-height: 180px; }
+    .log-container { margin-top: 10px; flex: 1; overflow-y: auto; background: var(--log-bg); border-radius: 10px; padding: 12px; color: #20c997; font-family: 'Consolas', monospace; font-size: 12px; line-height: 1.55; }
+    .log-entry { margin-bottom: 4px; }
+    .log-time { color: #adb5bd; }
+    .log-device { color: #74c0fc; }
+    .log-msg { color: #20c997; }
+
+    /* Camera Panel */
+    .camera-panel {
+      background: var(--cam-bg); color: #f8fafc; border-radius: 14px; padding: 16px;
+      border: 1px solid #334155; box-shadow: var(--shadow); flex-shrink: 0;
+    }
+    .camera-title { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 12px; font-weight: 900; color: #38bdf8; }
+    #cameraCanvas { width: 100%; aspect-ratio: 4 / 3; height: auto; display: block; background: #000; border: 1px solid #334155; border-radius: 10px; }
+    .camera-guide { margin-top: 10px; color: #94a3b8; font-size: 11px; line-height: 1.5; }
+    #input_video { display: none; }
+
+    /* Room Display Image Panel */
+    .room-area {
+      width: 100%; height: 100%; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+      box-shadow: var(--shadow); padding: 24px;
+    }
+    .image-wrapper { position: relative; display: inline-block; max-width: 100%; max-height: calc(100% - 48px); border-radius: 16px; overflow: hidden; }
+    #roomImage { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+
+    /* TV 동영상 화면 비스듬하게 변형 */
+    #tv-video {
+      display: none;
+      position: absolute;
+      z-index: 10;
+      top: 38.95%;
+      left: 22.55%;
+      width: 18.4%;
+      height: 13%;
+      transform-origin: top left;
+      transform: skewY(-30.7deg);
+      object-fit: fill;
+      background: #000;
+    }
+
+    .status-badges { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 16px; }
+    .badge { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 999px; font-size: 13px; font-weight: 900; border: 1px solid var(--border); background: var(--card); color: var(--text-dim); }
+    .badge.on { border-color: var(--on); background: rgba(25,135,84,0.1); color: var(--on); }
+    .badge.selected { border-color: var(--accent); background: rgba(13,110,253,0.1); color: var(--accent); }
+    .badge-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+    .progress-wrap { margin-top: 12px; width: 100%; height: 7px; background: var(--border); border-radius: 999px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.15s linear; }
+
+    @media (max-width: 1100px) {
+      body { flex-direction: column; overflow: auto; height: auto; }
+      .ui-wrapper { width: 100%; flex-direction: column; height: auto; }
+      .left-panel, .middle-panel { width: 100%; max-width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+      .right-panel { width: 100%; height: 600px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="ui-wrapper">
+    <!-- 1. 기기 제어 -->
+    <aside class="left-panel">
+      <div class="header">
+        <div class="header-icon">✋</div>
+        <div>
+          <h1>IoT Gesture Control</h1>
+          <p>손동작 기반 전기기구 제어</p>
+        </div>
+      </div>
+
+      <div class="section-title">기기 제어</div>
+
+      <section class="device-card" id="card-light">
+        <div class="device-header">
+          <div class="device-name"><span>💡</span> 전등</div>
+          <div class="toggle-wrap">
+            <span class="toggle-label" id="light-label">OFF</span>
+            <button class="toggle" id="toggle-light" onclick="toggleDevice('light')"></button>
+          </div>
+        </div>
+      </section>
+
+      <section class="device-card" id="card-tv">
+        <div class="device-header">
+          <div class="device-name"><span>📺</span> TV</div>
+          <div class="toggle-wrap">
+            <span class="toggle-label" id="tv-label">OFF</span>
+            <button class="toggle" id="toggle-tv" onclick="toggleDevice('tv')"></button>
+          </div>
+        </div>
+        <div class="media-controls" id="tv-media-controls">
+          <div class="media-track"><span>🎬</span><span id="tv-title">TV 영상 대기중</span></div>
+          <div class="btn-grid">
+            <button id="tv-play-btn" class="media-btn btn-full" onclick="toggleMediaPlay('tv')">▶ 재생 / 정지</button>
+            <button class="media-btn" onclick="changeMedia('tv', -1)">⏮ 이전</button>
+            <button class="media-btn" onclick="changeMedia('tv', 1)">다음 ⏭</button>
+            <button class="media-btn" onclick="adjustVolume('tv', -0.1)">🔉 볼륨 -</button>
+            <button class="media-btn" onclick="adjustVolume('tv', 0.1)">볼륨 + 🔊</button>
+            <button class="media-btn" onclick="seekMedia('tv', 5)">⏩ +5초</button>
+            <button class="media-btn" onclick="seekMedia('tv', -5)">-5초 ⏪</button>
+            <div class="vol-bar-wrap">
+              <span class="vol-label" id="tv-vol-label">볼륨 70%</span>
+              <div class="vol-bar-bg"><div class="vol-bar-fill" id="tv-vol-bar"></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="device-card" id="card-speaker">
+        <div class="device-header">
+          <div class="device-name"><span>🔊</span> 스피커</div>
+          <div class="toggle-wrap">
+            <span class="toggle-label" id="speaker-label">OFF</span>
+            <button class="toggle" id="toggle-speaker" onclick="toggleDevice('speaker')"></button>
+          </div>
+        </div>
+        <div class="media-controls" id="speaker-media-controls">
+          <div class="media-track"><span>🎵</span><span id="speaker-title">오디오 대기중</span></div>
+          <div class="btn-grid">
+            <button id="speaker-play-btn" class="media-btn btn-full" onclick="toggleMediaPlay('speaker')">▶ 재생 / 정지</button>
+            <button class="media-btn" onclick="changeMedia('speaker', -1)">⏮ 이전</button>
+            <button class="media-btn" onclick="changeMedia('speaker', 1)">다음 ⏭</button>
+            <button class="media-btn" onclick="adjustVolume('speaker', -0.1)">🔉 볼륨 -</button>
+            <button class="media-btn" onclick="adjustVolume('speaker', 0.1)">볼륨 + 🔊</button>
+            <div class="vol-bar-wrap">
+              <span class="vol-label" id="speaker-vol-label">볼륨 70%</span>
+              <div class="vol-bar-bg"><div class="vol-bar-fill" id="speaker-vol-bar"></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <!-- 2. 상태/로그/카메라 영역 -->
+    <aside class="middle-panel">
+      <div class="status-panel">
+        <div class="section-title">손동작 상태</div>
+        <div class="status-grid">
+          <div class="status-item">
+            <div class="status-label">현재 단계</div>
+            <div class="status-value accent" id="gesturePhase">기기 지정 대기</div>
+          </div>
+          <div class="status-item">
+            <div class="status-label">지정 기기</div>
+            <div class="status-value" id="selectedDeviceLabel">없음</div>
+          </div>
+          <div class="status-item">
+            <div class="status-label">손가락 수</div>
+            <div class="status-value" id="fingerCountLabel">0개</div>
+          </div>
+          <div class="status-item">
+            <div class="status-label">방향</div>
+            <div class="status-value" id="directionLabel">-</div>
+          </div>
+        </div>
+        <div class="finger-row" id="fingerChips">
+          <div class="finger-chip" id="chip-thumb">엄지</div>
+          <div class="finger-chip" id="chip-index">검지</div>
+          <div class="finger-chip" id="chip-middle">중지</div>
+          <div class="finger-chip" id="chip-ring">약지</div>
+          <div class="finger-chip" id="chip-pinky">소지</div>
+        </div>
+        <div class="progress-wrap"><div class="progress-fill" id="gestureProgress"></div></div>
+      </div>
+
+      <div class="log-panel">
+        <div class="section-title">시스템 로그</div>
+        <div class="log-container" id="logWindow"></div>
+      </div>
+
+      <section class="camera-panel">
+        <div class="camera-title">
+          <span>CAMERA</span>
+          <span id="cameraStatus">준비 중</span>
+        </div>
+        <video id="input_video" playsinline></video>
+        <canvas id="cameraCanvas" width="640" height="480"></canvas>
+        <div class="camera-guide">
+          기기 지정: 1개=전등, 2개=TV, 3개=스피커를 3초 유지 후 주먹.<br>
+          명령: 지정 후 3초 판독 → 2초 대기 → 다시 판독.
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <main class="right-panel">
+    <section class="room-area">
+      <div class="image-wrapper">
+        <img id="roomImage" src="" alt="방 상태 이미지" />
+        <video id="tv-video" playsinline controlsList="nodownload" disablePictureInPicture loop></video>
+      </div>
+      <audio id="speaker-audio" loop></audio>
+      <div class="status-badges">
+        <div class="badge" id="badge-light"><div class="badge-dot"></div>전등</div>
+        <div class="badge" id="badge-tv"><div class="badge-dot"></div>TV</div>
+        <div class="badge" id="badge-speaker"><div class="badge-dot"></div>스피커</div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    /*****************************************************************
+     * 1. 사용자 설정 영역
+     *****************************************************************/
+
+    const ASSETS = {
+      roomImages: {
+        '000': 'all_off.jpg',
+        '100': 'tv_on.jpg',
+        '010': 'light_on.jpg',
+        '001': 'audio_on.jpg',
+        '110': 'tv_light_on.jpg',
+        '101': 'tv_audio_on.jpg',
+        '011': 'audio_light_on.jpg',
+        '111': 'all_on.jpg'
+      },
+      tvPlaylist: [
+        { title: '건물풍경', src: '건물풍경.mp4' },
+        { title: '강아지', src: '강아지.mp4' }
+      ],
+      speakerPlaylist: [
+        { title: '소문의낙원', src: '소문의낙원.mp3' },
+        { title: '한로로 강남스타일', src: '한로로강남스타일.mp3' }
+      ],
+      fallback: {
+        useDemoMediaIfLocalMissing: false,
+        demoTv: 'https://www.w3schools.com/html/mov_bbb.mp4',
+        demoAudio: 'https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3'
+      }
+    };
+
+    const GESTURE_CONFIG = {
+      // 지정/명령 판독 시간과 명령 후 대기 시간
+      selectHoldMs: 3000,
+      commandReadMs: 3000,
+      cooldownMs: 2000,
+
+      // 손가락이 펴졌는지 판정하는 비율 경곗값
+      fingerRatioThresholds: {
+        thumb: 1.20,
+        index: 1.32,
+        middle: 1.32,
+        ring: 1.28,
+        pinky: 1.24
+      },
+
+      // 엄지만 추가 적용: 손목→엄지끝 벡터와 손목→엄지 시작마디 벡터 사이 각도가
+      // 이 값보다 작아야 엄지가 펴진 것으로 봅니다.
+      thumbAngleMaxDeg: 20,
+
+      // 방향 판정 경곗값
+      direction: {
+        minAbsX: 0.01,
+        maxAbsYForLooseHorizontal: 0.90
+      },
+
+      // 손 떨림 완화를 위한 최근 프레임 다수결 버퍼 길이
+      smoothingFrames: 8,
+
+      // 로그 최대 개수
+      maxLogs: 80
+    };
+
+    /*****************************************************************
+     * 2. 기본 상태 및 DOM
+     *****************************************************************/
+
+    const $ = id => document.getElementById(id);
+
+    const DEVICE_LABEL = {
+      light: '💡 전등',
+      tv: '📺 TV',
+      speaker: '🔊 스피커'
+    };
+
+    const state = {
+      light: false,
+      tv: false,
+      speaker: false
+    };
+
+    const mediaState = {
+      tv: { index: 0 },
+      speaker: { index: 0 }
+    };
+
+    const gestureState = {
+      phase: 'SELECT_WAIT',
+      selectedDevice: null,
+      selectCandidate: null,
+      selectStartAt: 0,
+      commandStartAt: 0,
+      cooldownStartAt: 0,
+      lastGesture: null,
+      frames: []
+    };
+
+    const el = {
+      log: $('logWindow'),
+      roomImage: $('roomImage'),
+      tvVideo: $('tv-video'),
+      speakerAudio: $('speaker-audio'),
+      cameraStatus: $('cameraStatus'),
+      cameraCanvas: $('cameraCanvas'),
+      inputVideo: $('input_video'),
+      gesturePhase: $('gesturePhase'),
+      selectedDeviceLabel: $('selectedDeviceLabel'),
+      fingerCountLabel: $('fingerCountLabel'),
+      directionLabel: $('directionLabel'),
+      gestureProgress: $('gestureProgress')
+    };
+
+    const cameraCtx = el.cameraCanvas.getContext('2d');
+    const mediaEl = { tv: el.tvVideo, speaker: el.speakerAudio };
+
+    // 브라우저 자동재생 정책 대응: 첫 클릭 시 음소거 해제
+    document.addEventListener('click', () => {
+      if (state.tv && mediaEl.tv.muted) {
+        mediaEl.tv.muted = false;
+        logAction(DEVICE_LABEL.tv, '클릭 감지: TV 소리 켬');
+      }
+    });
+
+    /*****************************************************************
+     * 3. 로그 및 UI 갱신
+     *****************************************************************/
+
+    function logAction(device, action) {
+      const t = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span class="log-time">[${t}]</span> <span class="log-device">${device}</span> <span class="log-msg">→ ${action}</span>`;
+      el.log.appendChild(entry);
+      el.log.scrollTop = el.log.scrollHeight;
+      if (el.log.children.length > GESTURE_CONFIG.maxLogs) {
+        el.log.removeChild(el.log.firstChild);
+      }
+    }
+
+    function setProgress(percent) {
+      el.gestureProgress.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    }
+
+    function setPhaseText(text, className = 'accent') {
+      el.gesturePhase.textContent = text;
+      el.gesturePhase.className = `status-value ${className}`;
+    }
+
+    function updateSelectedDeviceUI() {
+      const selected = gestureState.selectedDevice;
+      el.selectedDeviceLabel.textContent = selected ? DEVICE_LABEL[selected].replace(/^.\s/, '') : '없음';
+      ['light', 'tv', 'speaker'].forEach(device => {
+        $(`card-${device}`).classList.toggle('is-selected', selected === device);
+        $(`badge-${device}`).classList.toggle('selected', selected === device);
+      });
+    }
+
+    function updateDeviceUI(device) {
+      const isOn = state[device];
+      $(`toggle-${device}`).classList.toggle('on', isOn);
+      $(`${device}-label`).textContent = isOn ? 'ON' : 'OFF';
+      $(`card-${device}`).classList.toggle('is-on', isOn);
+      $(`badge-${device}`).classList.toggle('on', isOn);
+
+      const mediaControls = $(`${device}-media-controls`);
+      if (mediaControls) mediaControls.classList.toggle('visible', isOn);
+
+      if (device === 'tv') {
+        el.tvVideo.style.display = isOn ? 'block' : 'none';
+      }
+
+      updateRoomImage();
+    }
+
+    function updateRoomImage() {
+      const key = `${+state.tv}${+state.light}${+state.speaker}`;
+      el.roomImage.src = ASSETS.roomImages[key] || ASSETS.roomImages['000'];
+    }
+
+    function updateFingerUI(gesture) {
+      const names = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+      const labels = ['엄지', '검지', '중지', '약지', '소지'];
+      names.forEach((name, i) => {
+        const chip = $(`chip-${name}`);
+        chip.classList.toggle('open', !!gesture?.open[name]);
+        chip.textContent = `${labels[i]} ${gesture?.open[name] ? 'ON' : 'OFF'}`;
+      });
+      el.fingerCountLabel.textContent = `${gesture?.count ?? 0}개`;
+      el.directionLabel.textContent = gesture?.direction === 'left' ? '왼쪽' : gesture?.direction === 'right' ? '오른쪽' : '-';
+    }
+
+    /*****************************************************************
+     * 4. 기기 및 미디어 제어
+     *****************************************************************/
+
+    function toggleDevice(device, forceState = null) {
+      const next = forceState === null ? !state[device] : !!forceState;
+      if (state[device] === next) {
+        logAction(DEVICE_LABEL[device], next ? '이미 켜져 있음' : '이미 꺼져 있음');
+        return;
+      }
+
+      state[device] = next;
+      updateDeviceUI(device);
+      logAction(DEVICE_LABEL[device], next ? 'ON (켜짐)' : 'OFF (꺼짐)');
+
+      if (device === 'tv' || device === 'speaker') {
+        if (next) {
+          resetMediaVolume(device, 0.7);
+          playMedia(device);
+        } else {
+          pauseMedia(device);
+          logAction(DEVICE_LABEL[device], '일시정지');
+        }
+      }
+    }
+
+    function initMedia() {
+      if (ASSETS.fallback.useDemoMediaIfLocalMissing) {
+        if (!ASSETS.tvPlaylist.length) ASSETS.tvPlaylist.push({ title: 'Demo TV', src: ASSETS.fallback.demoTv });
+        if (!ASSETS.speakerPlaylist.length) ASSETS.speakerPlaylist.push({ title: 'Demo Audio', src: ASSETS.fallback.demoAudio });
+      }
+
+      if (!ASSETS.tvPlaylist.length) ASSETS.tvPlaylist.push({ title: 'TV 영상 1', src: ASSETS.fallback.demoTv });
+      if (!ASSETS.speakerPlaylist.length) ASSETS.speakerPlaylist.push({ title: '스피커 오디오 1', src: ASSETS.fallback.demoAudio });
+
+      loadMedia('tv', 0, false);
+      loadMedia('speaker', 0, false);
+      resetMediaVolume('tv', 0.7);
+      resetMediaVolume('speaker', 0.7);
+    }
+
+    function getPlaylist(device) {
+      return device === 'tv' ? ASSETS.tvPlaylist : ASSETS.speakerPlaylist;
+    }
+
+    function loadMedia(device, index, autoPlay = true) {
+      const playlist = getPlaylist(device);
+      if (playlist.length === 0) return;
+      const normalized = (index + playlist.length) % playlist.length;
+      const item = playlist[normalized];
+      mediaState[device].index = normalized;
+      mediaEl[device].src = item.src;
+      $(`${device}-title`).textContent = item.title;
+      if (autoPlay && state[device]) playMedia(device);
+    }
+
+    function playMedia(device) {
+      if (!state[device]) toggleDevice(device, true);
+      const playPromise = mediaEl[device].play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          if (error.name === 'NotAllowedError') {
+            if (device === 'tv') {
+              mediaEl[device].muted = true;
+              mediaEl[device].play().then(() => {
+                logAction(DEVICE_LABEL[device], '정책으로 인해 음소거로 재생됨 (화면 클릭 시 소리 켬)');
+              });
+            } else {
+              logAction(DEVICE_LABEL[device], '화면 아무 곳이나 한 번 클릭해야 오디오가 재생됩니다.');
+            }
+          } else {
+            logAction(DEVICE_LABEL[device], '재생 실패: ' + error.message);
+          }
+        });
+      }
+      const btn = $(`${device}-play-btn`);
+      if (btn) {
+        btn.classList.add('playing');
+        btn.textContent = '⏸ 일시정지';
+      }
+      logAction(DEVICE_LABEL[device], '재생');
+    }
+
+    function pauseMedia(device) {
+      const target = mediaEl[device];
+      if (!target) return;
+      target.pause();
+      const btn = $(`${device}-play-btn`);
+      if (btn) {
+        btn.classList.remove('playing');
+        btn.textContent = '▶ 재생 / 정지';
+      }
+    }
+
+    function toggleMediaPlay(device) {
+      if (!state[device]) {
+        toggleDevice(device, true);
+        return;
+      }
+      if (mediaEl[device].paused) playMedia(device);
+      else {
+        pauseMedia(device);
+        logAction(DEVICE_LABEL[device], '정지');
+      }
+    }
+
+    function changeMedia(device, dir) {
+      const playlist = getPlaylist(device);
+      loadMedia(device, mediaState[device].index + dir, true);
+      const item = playlist[mediaState[device].index];
+      logAction(DEVICE_LABEL[device], `${dir < 0 ? '이전' : '다음'} 항목: ${item.title}`);
+    }
+
+    function adjustVolume(device, delta) {
+      const target = mediaEl[device];
+      target.volume = Math.min(1, Math.max(0, target.volume + delta));
+      const pct = Math.round(target.volume * 100);
+      $(`${device}-vol-label`).textContent = `볼륨 ${pct}%`;
+      $(`${device}-vol-bar`).style.width = `${pct}%`;
+      logAction(DEVICE_LABEL[device], `볼륨 ${pct}%`);
+    }
+
+    function resetMediaVolume(device, value) {
+      mediaEl[device].volume = value;
+      const pct = Math.round(value * 100);
+      $(`${device}-vol-label`).textContent = `볼륨 ${pct}%`;
+      $(`${device}-vol-bar`).style.width = `${pct}%`;
+    }
+
+    function seekMedia(device, seconds) {
+      if (device !== 'tv') {
+        logAction(DEVICE_LABEL[device], '탐색 명령은 TV에만 적용됨');
+        return;
+      }
+      const target = mediaEl[device];
+      target.currentTime = Math.max(0, target.currentTime + seconds);
+      logAction(DEVICE_LABEL[device], `${seconds > 0 ? '+' : ''}${seconds}초 이동`);
+    }
+
+    function executeCommand(device, count, direction) {
+      if (!device) return;
+
+      if (count === 0) {
+        resetSelectedDevice();
+        return;
+      }
+
+      if (direction !== 'left' && direction !== 'right') {
+        logAction('✋ 손동작', '좌우 방향 불명확: 명령 무시');
+        return;
+      }
+
+      if (count === 1) {
+        toggleDevice(device, direction === 'left');
+        return;
+      }
+
+      if (device === 'light') {
+        logAction(DEVICE_LABEL.light, '전등은 손가락 1개 좌우 명령만 사용');
+        return;
+      }
+
+      if (count === 2) {
+        if (direction === 'left') playMedia(device);
+        else {
+          pauseMedia(device);
+          logAction(DEVICE_LABEL[device], '정지');
+        }
+        return;
+      }
+
+      if (count === 3) {
+        changeMedia(device, direction === 'left' ? -1 : 1);
+        return;
+      }
+
+      if (count === 4) {
+        adjustVolume(device, direction === 'left' ? -0.1 : 0.1);
+        return;
+      }
+
+      if (count === 5) {
+        if (device === 'tv') {
+          seekMedia('tv', direction === 'left' ? 5 : -5);
+        } else {
+          logAction(DEVICE_LABEL.speaker, '스피커에는 5초 탐색 명령을 적용하지 않음');
+        }
+      }
+    }
+
+    /*****************************************************************
+     * 5. 손동작 판정 — integrated_iot_gesture_control.html 원본 그대로
+     *****************************************************************/
+
+    const FINGER_POINTS = {
+      thumb:  { tip: 4, base: 2 },
+      index:  { tip: 8, base: 5 },
+      middle: { tip: 12, base: 9 },
+      ring:   { tip: 16, base: 13 },
+      pinky:  { tip: 20, base: 17 }
+    };
+
+    function dist2D(a, b) {
+      const dx = a.x - b.x;
+      const dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function angleBetweenFromWrist(wrist, tip, base) {
+      const v1 = { x: tip.x - wrist.x, y: tip.y - wrist.y };
+      const v2 = { x: base.x - wrist.x, y: base.y - wrist.y };
+      const dot = v1.x * v2.x + v1.y * v2.y;
+      const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+      const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+      if (!mag1 || !mag2) return 180;
+      const cos = Math.max(-1, Math.min(1, dot / (mag1 * mag2)));
+      return Math.acos(cos) * 180 / Math.PI;
+    }
+
+    function getFingerOpenState(landmarks) {
+      const wrist = landmarks[0];
+      const open = {};
+      const ratios = {};
+      const angles = {};
+
+      for (const [name, points] of Object.entries(FINGER_POINTS)) {
+        const tip = landmarks[points.tip];
+        const base = landmarks[points.base];
+        const tipDist = dist2D(wrist, tip);
+        const baseDist = dist2D(wrist, base) || 0.0001;
+        const ratio = tipDist / baseDist;
+        ratios[name] = ratio;
+
+        let isOpen = ratio > GESTURE_CONFIG.fingerRatioThresholds[name];
+
+        if (name === 'thumb') {
+          const angle = angleBetweenFromWrist(wrist, tip, base);
+          angles.thumb = angle;
+          isOpen = isOpen && angle < GESTURE_CONFIG.thumbAngleMaxDeg;
+        }
+
+        open[name] = isOpen;
+      }
+
+      return { open, ratios, angles };
+    }
+
+    function getFingerDirection(landmarks, open) {
+      const opened = Object.entries(open).filter(([, isOpen]) => isOpen).map(([name]) => name);
+      if (!opened.length) return 'none';
+
+      let dxSum = 0;
+      let dySum = 0;
+      opened.forEach(name => {
+        const { tip, base } = FINGER_POINTS[name];
+        dxSum += landmarks[tip].x - landmarks[base].x;
+        dySum += landmarks[tip].y - landmarks[base].y;
+      });
+
+      const dx = dxSum / opened.length;
+      const dy = dySum / opened.length;
+      const cfg = GESTURE_CONFIG.direction;
+
+      if (Math.abs(dx) < cfg.minAbsX) return 'unknown';
+      if (Math.abs(dy) > cfg.maxAbsYForLooseHorizontal) return 'unknown';
+
+      return dx < 0 ? 'left' : 'right';
+    }
+
+    function analyzeGesture(landmarks) {
+      const { open, ratios, angles } = getFingerOpenState(landmarks);
+      const count = Object.values(open).filter(Boolean).length;
+      const direction = getFingerDirection(landmarks, open);
+      return { open, count, direction, ratios, angles, at: Date.now() };
+    }
+
+    function mirrorLandmarks(landmarks) {
+      return landmarks.map(point => ({ ...point, x: 1 - point.x }));
+    }
+
+    function stableGesture(raw) {
+      if (!raw) return null;
+      gestureState.frames.push(raw);
+      while (gestureState.frames.length > GESTURE_CONFIG.smoothingFrames) gestureState.frames.shift();
+
+      const recent = gestureState.frames;
+      const countVotes = new Map();
+      const dirVotes = new Map();
+
+      for (const g of recent) {
+        countVotes.set(g.count, (countVotes.get(g.count) || 0) + 1);
+        dirVotes.set(g.direction, (dirVotes.get(g.direction) || 0) + 1);
+      }
+
+      const count = [...countVotes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const direction = [...dirVotes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+      // open 상태는 최신 프레임 기준으로 보여주되, count/direction만 다수결 적용
+      return { ...raw, count, direction };
+    }
+
+    function selectDeviceFromFingerCount(count) {
+      if (count === 1) return 'light';
+      if (count === 2) return 'tv';
+      if (count === 3) return 'speaker';
+      return null;
+    }
+
+    function resetSelectedDevice() {
+      gestureState.phase = 'SELECT_WAIT';
+      gestureState.selectedDevice = null;
+      gestureState.selectCandidate = null;
+      gestureState.selectStartAt = 0;
+      gestureState.commandStartAt = 0;
+      gestureState.cooldownStartAt = 0;
+      setPhaseText('기기 지정 대기', 'accent');
+      setProgress(0);
+      updateSelectedDeviceUI();
+      logAction('✋ 손동작', '기기 지정 초기화');
+    }
+
+    function handleGestureProtocol(gesture) {
+      const now = Date.now();
+      updateFingerUI(gesture);
+      updateSelectedDeviceUI();
+
+      if (!gesture) {
+        setPhaseText('손 인식 대기', 'warn');
+        setProgress(0);
+        return;
+      }
+
+      if (gestureState.phase === 'SELECT_WAIT') {
+        const candidate = selectDeviceFromFingerCount(gesture.count);
+        setPhaseText('기기 지정 대기', 'accent');
+
+        if (!candidate) {
+          gestureState.selectCandidate = null;
+          gestureState.selectStartAt = 0;
+          setProgress(0);
+          return;
+        }
+
+        if (gestureState.selectCandidate !== candidate) {
+          gestureState.selectCandidate = candidate;
+          gestureState.selectStartAt = now;
+          logAction('✋ 손동작', `${DEVICE_LABEL[candidate]} 지정 후보 감지`);
+        }
+
+        const elapsed = now - gestureState.selectStartAt;
+        setProgress(elapsed / GESTURE_CONFIG.selectHoldMs * 100);
+
+        if (elapsed >= GESTURE_CONFIG.selectHoldMs) {
+          gestureState.phase = 'SELECT_CONFIRM_FIST';
+          setPhaseText('주먹으로 지정 확정', 'warn');
+          setProgress(100);
+          logAction('✋ 손동작', `${DEVICE_LABEL[candidate]} 후보 유지 완료: 주먹 대기`);
+        }
+        return;
+      }
+
+      if (gestureState.phase === 'SELECT_CONFIRM_FIST') {
+        setPhaseText('주먹으로 지정 확정', 'warn');
+        setProgress(gesture.count === 0 ? 100 : 65);
+
+        if (gesture.count === 0 && gestureState.selectCandidate) {
+          gestureState.selectedDevice = gestureState.selectCandidate;
+          if (gestureState.selectedDevice === 'light') {
+            toggleDevice('light');
+          }
+          gestureState.phase = 'COMMAND_READ';
+          gestureState.commandStartAt = now;
+          gestureState.selectCandidate = null;
+          setPhaseText('명령 판독 중', 'accent');
+          setProgress(0);
+          updateSelectedDeviceUI();
+          logAction('✋ 손동작', `${DEVICE_LABEL[gestureState.selectedDevice]} 지정 완료`);
+        }
+        return;
+      }
+
+      if (gestureState.phase === 'COMMAND_READ') {
+        setPhaseText('명령 판독 중', 'accent');
+        const elapsed = now - gestureState.commandStartAt;
+        setProgress(elapsed / GESTURE_CONFIG.commandReadMs * 100);
+
+        if (elapsed >= GESTURE_CONFIG.commandReadMs) {
+          executeCommand(gestureState.selectedDevice, gesture.count, gesture.direction);
+
+          if (gestureState.phase !== 'SELECT_WAIT') {
+            gestureState.phase = 'COOLDOWN';
+            gestureState.cooldownStartAt = now;
+            setPhaseText('명령 후 대기', 'warn');
+            setProgress(0);
+            logAction('✋ 손동작', '대기 상태 진입');
+          }
+        }
+        return;
+      }
+
+      if (gestureState.phase === 'COOLDOWN') {
+        setPhaseText('명령 후 대기', 'warn');
+        const elapsed = now - gestureState.cooldownStartAt;
+        setProgress(elapsed / GESTURE_CONFIG.cooldownMs * 100);
+
+        if (elapsed >= GESTURE_CONFIG.cooldownMs) {
+          gestureState.phase = 'COMMAND_READ';
+          gestureState.commandStartAt = now;
+          setPhaseText('명령 판독 중', 'accent');
+          setProgress(0);
+          logAction('✋ 손동작', `${DEVICE_LABEL[gestureState.selectedDevice]} 명령 판독 재개`);
+        }
+      }
+    }
+
+    /*****************************************************************
+     * 6. 카메라 및 MediaPipe — integrated_iot_gesture_control.html 원본 그대로
+     *****************************************************************/
+
+    function drawCamera(results, landmarks) {
+      cameraCtx.save();
+      cameraCtx.clearRect(0, 0, el.cameraCanvas.width, el.cameraCanvas.height);
+
+      // 사용자가 보기 편하도록 거울 모드로 표시합니다.
+      cameraCtx.scale(-1, 1);
+      cameraCtx.translate(-el.cameraCanvas.width, 0);
+      cameraCtx.drawImage(results.image, 0, 0, el.cameraCanvas.width, el.cameraCanvas.height);
+
+      if (landmarks) {
+        drawConnectors(cameraCtx, landmarks, HAND_CONNECTIONS, { color: '#38bdf8', lineWidth: 2 });
+        drawLandmarks(cameraCtx, landmarks, { color: '#f8fafc', lineWidth: 1, radius: 2 });
+      }
+
+      cameraCtx.restore();
+    }
+
+    function onResults(results) {
+      const landmarks = results.multiHandLandmarks && results.multiHandLandmarks.length > 0
+        ? results.multiHandLandmarks[0]
+        : null;
+
+      drawCamera(results, landmarks);
+
+      if (!landmarks) {
+        el.cameraStatus.textContent = '손 없음';
+        handleGestureProtocol(null);
+        return;
+      }
+
+      el.cameraStatus.textContent = '인식 중';
+      const recognitionLandmarks = mirrorLandmarks(landmarks);
+      const raw = analyzeGesture(recognitionLandmarks);
+      const gesture = stableGesture(raw);
+      gestureState.lastGesture = gesture;
+      handleGestureProtocol(gesture);
+    }
+
+    function initCamera() {
+      if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
+        el.cameraStatus.textContent = 'MediaPipe 로드 실패';
+        logAction('📷 카메라', 'MediaPipe 라이브러리를 불러오지 못했습니다');
+        return;
+      }
+
+      const hands = new Hands({
+        locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+      });
+
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.65,
+        minTrackingConfidence: 0.65
+      });
+
+      hands.onResults(onResults);
+
+      const camera = new Camera(el.inputVideo, {
+        onFrame: async () => {
+          await hands.send({ image: el.inputVideo });
+        },
+        width: 640,
+        height: 480
+      });
+
+      camera.start()
+        .then(() => {
+          el.cameraStatus.textContent = '실행 중';
+          logAction('📷 카메라', '시작 완료');
+        })
+        .catch(err => {
+          el.cameraStatus.textContent = '권한 필요';
+          logAction('📷 카메라', `시작 실패: ${err.message || err}`);
+        });
+    }
+
+    /*****************************************************************
+     * 7. 초기화
+     *****************************************************************/
+
+    ['tv', 'speaker'].forEach(device => {
+      mediaEl[device].addEventListener('ended', () => {
+        pauseMedia(device);
+        logAction(DEVICE_LABEL[device], '재생 완료');
+      });
+    });
+
+    function init() {
+      initMedia();
+      updateRoomImage();
+      updateSelectedDeviceUI();
+      updateDeviceUI('light');
+      updateDeviceUI('tv');
+      updateDeviceUI('speaker');
+      setPhaseText('기기 지정 대기', 'accent');
+      setProgress(0);
+      logAction('🖥 시스템', '초기화 완료');
+      initCamera();
+    }
+
+    init();
+  </script>
+</body>
+</html>
