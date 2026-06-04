@@ -3,6 +3,6 @@ print("Hello, world!")
 print("This is nothing")
 
 
-print("wow")
-//wow
+print("test")
+//고칩니다.
 
